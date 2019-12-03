@@ -1,0 +1,28 @@
+version: '3.7'
+services:
+
+  coord:
+    build: .
+    image: idris/two-pc-idr
+    volumes:
+    - .:/src
+    - log_volume:/var/log
+    container_name: coord
+
+  cohort1:
+    image: idris/two-pc-idr
+    volumes:
+    - .:/src
+    - log_volume:/var/log
+    depends_on:
+      - coord
+
+  cohort2:
+    image: idris/two-pc-idr
+    volumes:
+    - .:/src
+    - log_volume:/var/log
+    depends_on:
+      - coord
+volumes:
+  log_volume:
