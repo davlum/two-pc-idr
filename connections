@@ -1,0 +1,3 @@
+postgresql://idris:idris@localhost:5432/idris
+postgresql://idris:idris@localhost:5433/idris
+postgresql://idris:idris@localhost:5434/idris

@@ -1,7 +1,14 @@
 package two-pc-idr
 
-sourcedir = src
-executable = "two-pc-idr"
-main = Main
+version    = 0.1.0
+brief      = "Two phase commit protocol with Postgres"
 
-opts = "-p effects -p contrib"
+author     = David Lum
+homepage   = https://github.com/davlum/two-pc-idr
+
+
+opts        = "-p contrib -p pruviloj -X ElabReflection"
+sourcedir  = src
+executable = twopc
+main       = Main
+makefile   = Makefile
