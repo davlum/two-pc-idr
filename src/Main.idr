@@ -34,20 +34,20 @@ record DbConn where
   user, password, hostname : String
   port : Int
   dbname : String
-  
+
 breakMaybe : (Char -> Bool) -> String -> Maybe (String, String)
-breakMaybe f s = 
+breakMaybe f s =
   let (before, after) = break f s
   in case before of
       "" => Nothing
-      _  => Just (before, after) 
+      _  => Just (before, after)
 
 
 psqlUriPrefix : String
 psqlUriPrefix = "postgresql://"
 
 serializeDbConn : DbConn -> String
-serializeDbConn (MkDbConn usr pass host p db) = 
+serializeDbConn (MkDbConn usr pass host p db) =
   psqlUriPrefix ++ usr ++ ":" ++ pass ++ "@" ++ host ++ ":" ++ show p ++ "/" ++ db
 
 
@@ -59,9 +59,9 @@ implementation Show Query where
   show (Prepare q) = "BEGIN; PREPARE TRANSACTION 'foobar';\n" ++ q
 
 pqConnectDb : DbConn -> IO DbPtr
-pqConnectDb dbConn = do 
+pqConnectDb dbConn = do
     ptr <- foreign FFI_C "connect" (String -> IO Ptr) (serializeDbConn dbConn)
-    pure $ MkDbPtr ptr 
+    pure $ MkDbPtr ptr
 
 pqErrorMessage : DbPtr -> IO String
 pqErrorMessage (MkDbPtr p) = foreign FFI_C "dbErrorMessage" (Ptr -> IO String) p
@@ -108,7 +108,7 @@ data DbError : Type where
   UriParseError : String -> DbError
 
 parseDbConn : String -> Maybe DbConn
-parseDbConn str = 
+parseDbConn str =
   if isPrefixOf psqlUriPrefix str
   then do
     let rest = pack $ drop (length psqlUriPrefix) (unpack str)
@@ -228,7 +228,7 @@ mkResultStatus i = case i of
   i => OtherRes i
 
 pqResultStatus : ResultPtr -> IO ResultStatus
-pqResultStatus (MkResultPtr p) = do 
+pqResultStatus (MkResultPtr p) = do
   statusCode <- foreign FFI_C "PQresultStatus" (Ptr -> IO Int) p
   pure $ mkResultStatus statusCode
 
@@ -266,7 +266,7 @@ interface Database (m : Type -> Type) where
   connect : DbConn -> ST m (Either DbError Var) [addIfRight (Db 1)]
   disconnect : (db : Var) -> ST m () [remove db (Db 1)]
   query : (db : Var) -> Query -> ST m (Either ResultError ResultStatus) [db ::: Db 1]
-  
+
   connectMany : Vect n DbConn -> ST m (Either (List DbError) Var) [addIfRight (Db n)]
   disconnectMany : (db: Var) -> ST m () [remove db (Db n)]
   queryMany : (db : Var) -> Query -> ST m (Either (List ResultError) (Vect n ResultStatus)) [db ::: Db n]
@@ -282,7 +282,7 @@ aggErrors {n} eithers = let (MkDPair len vec) = mapMaybe getRight eithers
                         in case exactLength n vec of
                                 Just v  => Right v
                                 Nothing => Left (partitionEithers $ toList eithers)
-                                           
+
 
 implementation Database IO where
   Db n = State (Vect n DbPtr)
@@ -323,7 +323,7 @@ implementation Database IO where
          Right vec      => pure $ Right vec
          Left (errs, _) => pure $ Left errs
 
-  
+
 
 ------- End Database Module -------
 ------- Start Two PC Module -------
@@ -336,26 +336,20 @@ interface Coord (m : Type -> Type) where
   connectPeers : Vect n DbConn -> ST m (Either (List DbError) Var) [addIfRight (MkCoord n Init)]
   disconnectPeers : (coord : Var) -> ST m () [remove coord (MkCoord n Init)]
 
-  prepare : (coord : Var) -> Query -> ST m (Either (List ResultError) ()) [coord ::: MkCoord n Init :-> 
-                                                                            (\res => MkCoord n (case res of 
+  prepare : (coord : Var) -> Query -> ST m (Either (List ResultError) ()) [coord ::: MkCoord n Init :->
+                                                                            (\res => MkCoord n (case res of
                                                                                                   Right _ => Persist
                                                                                                   Left  _ => Abort))]
 
-  persist : (coord : Var) -> ST m (Either (List ResultError) ()) [coord ::: MkCoord n Persist :-> 
-                                                                   (\res => MkCoord n (case res of 
-                                                                                         Right _ => Init
-                                                                                         Left  _ => Persist))]
+  persist : ConsoleIO m => (coord : Var) -> ST m () [coord ::: MkCoord n Persist :-> MkCoord n Init]
 
-  abort : (coord : Var) -> ST m (Either (List ResultError) ()) [coord ::: MkCoord n Abort :->
-                                                                 (\res => MkCoord n (case res of 
-                                                                                         Right _ => Init
-                                                                                         Left  _ => Abort))]
+  abort : ConsoleIO m => (coord : Var) -> ST m () [coord ::: MkCoord n Abort :-> MkCoord n Init]
 
 
-Database m => Coord m where 
+Database m => Coord m where
   MkCoord n x = Db n {m}
 
-  connectPeers connVec = do 
+  connectPeers connVec = do
     Right db <- connectMany connVec | Left errs => pure (Left errs)
     pure (Right db)
 
@@ -367,30 +361,16 @@ Database m => Coord m where
     pure (Right ())
 
   persist coord = do
-    Right _ <- queryMany coord Commit | Left errs => pure (Left errs)
-    pure (Right ())
+    status <- queryMany coord Commit
+    case status of
+       Right _   => putStrLn "Persist succeeded."
+       Left errs => putStrLn ("Persist failed:\n" ++ unlines (map show errs))
 
   abort coord = do
-    Right _ <- queryMany coord Rollback | Left errs => pure (Left errs)
-    pure (Right ())
-
-
-retryAbort : (ConsoleIO m, Coord m) => (coord : Var) -> ST m () [coord ::: MkCoord n {m} Abort :-> MkCoord n {m} Init]
-retryAbort coord = do
-  status <- abort coord
-  case status of
+    status <- queryMany coord Rollback
+    case status of
        Right _   => putStrLn "Abort succeeded."
-       Left errs => do putStrLn ("Abort failed:\n" ++ unlines (map show errs))
-                       retryAbort coord
-
-
-retryPersist : (ConsoleIO m, Coord m) => (coord : Var) -> ST m () [coord ::: MkCoord n {m} Persist :-> MkCoord n {m} Init]
-retryPersist coord = do
-  status <- persist coord
-  case status of
-       Right _   => putStrLn "Commit succeeded."
-       Left errs => do putStrLn ("Persist failed:\n" ++ unlines (map show errs))
-                       retryPersist coord
+       Left errs => putStrLn ("Abort failed:\n" ++ unlines (map show errs))
 
 
 transact : (ConsoleIO m, Coord m) => (coord : Var) -> Query -> ST m () [coord ::: MkCoord n {m} Init]
@@ -398,9 +378,9 @@ transact coord query = do
   status <- prepare coord query
   case status of
        Right _   => do putStrLn "Prepare succeeded. Commiting transaction..."
-                       retryPersist coord
+                       persist coord
        Left errs => do putStrLn ("Prepare failed:\n" ++ unlines (map show errs))
-                       retryAbort coord
+                       abort coord
 
 
 getString : ConsoleIO m => ST m String []
@@ -415,20 +395,20 @@ getString = go "" where
 getQuery : ConsoleIO m => ST m Query []
 getQuery = do
   maybeQuery <- getString
-  case maybeQuery of 
+  case maybeQuery of
        "END" => pure Stop
        query => pure (Prepare query)
 
 
 transactQueries : (ConsoleIO m, Coord m) => (coord : Var) -> ST m () [coord ::: MkCoord n {m} Init]
 transactQueries coord = do
-  putStrLn "Input query or END to Stop:" 
+  putStrLn "Input query or END to Stop:"
   maybeQuery <- getQuery
   case maybeQuery of
        Stop => pure ()
        query => do transact coord query
                    transactQueries coord
-        
+
 
 session : (ConsoleIO m, Coord m) => Vect n DbConn -> ST m () []
 session conns = do
@@ -458,9 +438,9 @@ main = do
   args <- getArgs
   case fromListOfLength 2 args of
     Nothing => putStrLn $ "Bad Usage: " ++ unwords args ++ "\nUsage: ./<executable> path-to-config"
-    Just vec => do 
+    Just vec => do
       Right connLs <- run (parseConnectionFile (last vec)) | Left err => putStrLn (show err)
       case fromListOfLength (length connLs) connLs of
            Nothing => ?nothing
            Just vec => run (session vec)
-     
+
