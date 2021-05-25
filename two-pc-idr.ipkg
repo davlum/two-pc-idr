@@ -7,7 +7,7 @@ author     = David Lum
 homepage   = https://github.com/davlum/two-pc-idr
 
 
-opts        = "-p contrib -p pruviloj -X ElabReflection"
+opts        = "-p contrib"
 sourcedir  = src
 executable = twopc
 main       = Main

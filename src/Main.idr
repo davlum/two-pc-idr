@@ -7,9 +7,6 @@ import CFFI
 import Control.ST
 import Control.ST.ImplicitCall
 import Control.ST.File
-import Pruviloj
-import Pruviloj.Derive.DecEq
-
 
 %link C "pq-idr.o"
 %include C  "pq-idr.h"
@@ -95,13 +92,6 @@ data ConnectionStatus
   | Needed
   | OtherConn Int
 
-total
-decConnectionStatusEq : (x, y : ConnectionStatus) -> Dec (x = y)
-%runElab (deriveDecEq `{decConnectionStatusEq})
-
-implementation DecEq ConnectionStatus where
-  decEq x y = decConnectionStatusEq x y
-
 data DbError : Type where
   ConnErr : ConnectionStatus -> String -> DbError
   FileErr : FileError -> DbError
@@ -125,20 +115,6 @@ parseDbConn' : String -> Either DbError DbConn
 parseDbConn' str = case parseDbConn str of
                         Just c  => Right c
                         Nothing => Left (UriParseError str)
-
-decFileErrorEq : (x, y : FileError) -> Dec (x = y)
-%runElab (deriveDecEq `{decFileErrorEq})
-
-implementation DecEq FileError where
-  decEq x y = decFileErrorEq x y
-
-total
-decDbErrorEq : (x, y : DbError) -> Dec (x = y)
-%runElab (deriveDecEq `{decDbErrorEq})
-
-implementation DecEq DbError where
-  decEq x y = decDbErrorEq x y
-
 
 connErrNotFileErr : (ConnErr x y = FileErr z) -> Void
 connErrNotFileErr Refl impossible
